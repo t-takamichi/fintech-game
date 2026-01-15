@@ -59,6 +59,7 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 		return domain.Account{}, errors.New("account already exists")
 	}
 
+	// FIXME: UUID生成を外部から注入できるようにする
 	id := uuid.New()
 	master := entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
 	balance := entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
