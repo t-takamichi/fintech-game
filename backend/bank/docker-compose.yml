@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bank_user
+      POSTGRES_PASSWORD: bank_pass
+      POSTGRES_DB: bank_db
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+    ports:
+      - '5432:5432'
+
+  migrate:
+    image: migrate/migrate:v4.15.2
+      # entrypoint removed to allow normal run commands
+    depends_on:
+      - db
+    volumes:
+      - ./migrations:/migrations:ro
+
+volumes:
+  db-data:

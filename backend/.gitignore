@@ -1,0 +1,31 @@
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go build/test outputs
+*.test
+*.out
+coverage.out
+
+# Binaries and build artifacts
+**/bin/
+**/dist/
+**/build/
+
+# Environment
+.env
+.env.*.local
+
+# Logs
+*.log
+
+# Docker overrides
+docker-compose.override.yml
+
+# Databases
+*.sqlite
+*.db

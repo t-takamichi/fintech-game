@@ -1,0 +1,49 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build/test outputs
+*.test
+*.out
+coverage.out
+*.prof
+
+# Dependency directories
+vendor/
+Godeps/
+
+# Build dirs
+_build/
+dist/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*.local
+
+# Generated code
+*.pb.go
+*.gen.go
+
+# Databases
+*.db
+*.sqlite
+
+# Local executables
+server
+
+# Logs
+*.log

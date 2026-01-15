@@ -1,0 +1,46 @@
+# Binaries
+/bin/
+bin/
+
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+coverage.out
+
+# Go vendor
+vendor/
+
+# Runtime files
+*.log
+*.pid
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Environment files (may contain secrets)
+.env
+.env.*
+
+# Docker
+docker-compose.override.yml
+
+# Editor temp files
+*~
+# swap files
+*.swp
+
+# Node
+node_modules/
+
+# Misc
+dist/
+build/
