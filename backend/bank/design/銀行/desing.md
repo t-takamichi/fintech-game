@@ -50,17 +50,17 @@
 ### 3.1 プレイヤー用 API（フロントエンド向け）
 | メソッド | エンドポイント | 説明 |
 | :--- | :--- | :--- |
-| **GET** | `/api/v1/bank/account/:id/status` | 口座状況（純資産・借金フラグ等）を取得 |
-| **GET** | `/api/v1/bank/account/history` | 通帳の履歴リストを取得 |
-| **PATCH** | `/api/v1/bank/account/history/print` | 記帳演出（カチャカチャ音）完了の通知 |
+| **GET** | `/api/bank/account/:id/status` | 口座状況（純資産・借金フラグ等）を取得 |
+| **GET** | `/api/bank/account/history` | 通帳の履歴リストを取得 |
+| **PATCH** | `/api/bank/account/history/print` | 記帳演出（カチャカチャ音）完了の通知 |
 
 ### 3.2 システム内部用 API（他サービス・AIエンジン向け）
 | メソッド | エンドポイント | 説明 | 発生タイミング |
 | :--- | :--- | :--- | :--- |
-| **POST** | `/internal/v1/bank/account/create` | **口座のみ作成（残高0）** | ユーザー登録完了直後 |
-| **POST** | `/internal/v1/bank/account/initialize` | **初期ローン100万実行** | チュートリアル開始時 |
-| **POST** | `/internal/v1/bank/account/transaction` | 資金移動（売買・利息等） | 株式売買・バッチ処理時 |
-| **POST** | `/internal/v1/bank/account/settle` | 最終精算とスコア判定 | 6日目終了時 |
+| **POST** | `/internal/bank-accounts/create` | **口座のみ作成（残高0）** | ユーザー登録完了直後 |
+| **POST** | `/internal/bank-accounts/initialize` | **初期ローン100万実行** | チュートリアル開始時 |
+| **POST** | `/internal/bank-accounts/transaction` | 資金移動（売買・利息等） | 株式売買・バッチ処理時 |
+| **POST** | `/internal/bank-accounts/settle` | 最終精算とスコア判定 | 6日目終了時 |
 
 ---
 
