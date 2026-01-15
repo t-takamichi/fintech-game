@@ -55,6 +55,8 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 	balance := entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
 
 	var created entity.AccountMaster
+	// FIXME: エラーハンドリングを改善する。
+	// FIXME: トランザクションの扱いをRepository層に移すべきか検討する。
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if _, err := s.accountRepository.CreateMasterTx(ctx, tx, master); err != nil {
 			return err
@@ -62,7 +64,6 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 		if _, err := s.accountBalanceRepository.CreateAccountBalanceTx(ctx, tx, balance); err != nil {
 			return err
 		}
-		// 結果を読み直す（Preload で balance を含める）
 		if err := tx.Preload("AccountBalance").First(&created, "user_id = ?", id).Error; err != nil {
 			return err
 		}
@@ -72,7 +73,6 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 		return domain.Account{}, err
 	}
 
-	// created から domain.Account を組み立てて返す
 	return domain.Account{
 		UserID:        created.UserID,
 		Balance:       created.AccountBalance.Balance,
