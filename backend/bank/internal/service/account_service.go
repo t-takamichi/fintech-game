@@ -9,7 +9,7 @@ import (
 const DebtThreshold int64 = 0
 
 type AccountService interface {
-	GetAccountStatus(accountID string) (domain.AccountStatus, error)
+	GetAccountStatus(subjectID string) (domain.AccountStatus, error)
 }
 
 type accountService struct {
@@ -20,15 +20,13 @@ func NewAccountService(r repository.AccountRepository) AccountService {
 	return &accountService{repo: r}
 }
 
-func (s *accountService) GetAccountStatus(accountID string) (domain.AccountStatus, error) {
-	// master と balance を個別に取得して組み合わせる
-	m, err := s.repo.GetMasterByID(accountID)
+func (s *accountService) GetAccountStatus(subjectID string) (domain.AccountStatus, error) {
+	m, err := s.repo.GetMasterByID(subjectID)
 	if err != nil {
 		return domain.AccountStatus{}, err
 	}
 
 	netAsset := m.AccountBalance.Balance - m.AccountBalance.LoanPrincipal
-	// `is_debt` is considered true when there is any loan principal outstanding.
 	isDebt := m.AccountBalance.LoanPrincipal > 0
 
 	return domain.AccountStatus{

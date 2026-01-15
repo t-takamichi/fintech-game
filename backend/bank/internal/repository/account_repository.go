@@ -10,7 +10,7 @@ import (
 
 // AccountRepository defines DB operations for accounts (master/balance split).
 type AccountRepository interface {
-	GetMasterByID(userID string) (entity.AccountMaster, error)
+	GetMasterByID(subjectID string) (entity.AccountMaster, error)
 }
 
 type gormAccountRepo struct {
@@ -21,13 +21,15 @@ func NewAccountRepository(db *gorm.DB) AccountRepository {
 	return &gormAccountRepo{db: db}
 }
 
-func (r *gormAccountRepo) GetMasterByID(userID string) (entity.AccountMaster, error) {
+func (r *gormAccountRepo) GetMasterByID(subjectID string) (entity.AccountMaster, error) {
 	var m entity.AccountMaster
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return entity.AccountMaster{}, err
+	if uid, err := uuid.Parse(subjectID); err == nil {
+		if err := r.db.Preload("AccountBalance").First(&m, "user_id = ?", uid).Error; err == nil {
+			return m, nil
+		}
 	}
-	if err := r.db.Preload("AccountBalance").First(&m, "user_id = ?", uid).Error; err != nil {
+
+	if err := r.db.Preload("AccountBalance").First(&m, "subject_id = ?", subjectID).Error; err != nil {
 		return entity.AccountMaster{}, err
 	}
 	return m, nil

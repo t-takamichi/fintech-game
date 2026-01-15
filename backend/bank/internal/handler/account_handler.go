@@ -17,8 +17,8 @@ func NewAccountHandler(svc service.AccountService) *AccountHandler {
 }
 
 func (h *AccountHandler) GetAccountStatusHandler(c echo.Context) error {
-	accountID := c.Param("id")
-	status, err := h.svc.GetAccountStatus(accountID)
+	subjectID := c.Param("id")
+	status, err := h.svc.GetAccountStatus(subjectID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
