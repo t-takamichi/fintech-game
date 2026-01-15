@@ -55,6 +55,9 @@ func main() {
 	accountRepo := repository.NewAccountRepository(gdb)
 	accountService := svc.NewAccountService(accountRepo)
 	accountHandler := handler.NewAccountHandler(accountService)
+
+	internalBankAccountHandler := handler.NewInternalBankAccountHandler()
+
 	echo.Use(middleware.Recover())
 	echo.Use(middleware.RequestLogger())
 
@@ -66,8 +69,10 @@ func main() {
 	echo.GET("/", hello)
 
 	bank := echo.Group("/api/bank")
-
 	bank.GET("/account/:id/status", accountHandler.GetAccountStatusHandler)
+
+	internal := echo.Group("/internal/bank-accounts")
+	internal.POST("/Create", internalBankAccountHandler.Create)
 
 	// Start server
 	if err := echo.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
