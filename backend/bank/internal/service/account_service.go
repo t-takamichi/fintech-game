@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"github/t-takamichi/fintech-game/backend/bank/internal/domain"
 	"github/t-takamichi/fintech-game/backend/bank/internal/entity"
 	repository "github/t-takamichi/fintech-game/backend/bank/internal/repository"
@@ -50,6 +51,14 @@ func (s *accountService) GetAccountStatus(subjectID string) (domain.AccountStatu
 }
 
 func (s *accountService) CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, error) {
+
+	// FIXME: バリデーションを追加する
+	_, verr := s.accountRepository.GetMasterByID(subjectID)
+
+	if verr == nil {
+		return domain.Account{}, errors.New("account already exists")
+	}
+
 	id := uuid.New()
 	master := entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
 	balance := entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
