@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"github.com/google/uuid"
 
 	"github/t-takamichi/fintech-game/backend/bank/internal/entity"
@@ -11,6 +13,7 @@ import (
 // AccountRepository defines DB operations for accounts (master/balance split).
 type AccountRepository interface {
 	GetMasterByID(subjectID string) (entity.AccountMaster, error)
+	CreateMasterTx(ctx context.Context, tx *gorm.DB, am entity.AccountMaster) (entity.AccountMaster, error)
 }
 
 type gormAccountRepo struct {
@@ -33,4 +36,11 @@ func (r *gormAccountRepo) GetMasterByID(subjectID string) (entity.AccountMaster,
 		return entity.AccountMaster{}, err
 	}
 	return m, nil
+}
+
+func (r *gormAccountRepo) CreateMasterTx(ctx context.Context, tx *gorm.DB, am entity.AccountMaster) (entity.AccountMaster, error) {
+	if err := tx.WithContext(ctx).Create(&am).Error; err != nil {
+		return entity.AccountMaster{}, err
+	}
+	return am, nil
 }

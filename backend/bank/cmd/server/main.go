@@ -52,11 +52,13 @@ func main() {
 	}
 
 	// create repository layer backed by GORM
-	accountRepo := repository.NewAccountRepository(gdb)
-	accountService := svc.NewAccountService(accountRepo)
+	accountRepository := repository.NewAccountRepository(gdb)
+	accountBalanceRepository := repository.NewAccountBalanceRepository(gdb)
+
+	accountService := svc.NewAccountService(accountRepository, accountBalanceRepository, gdb)
 	accountHandler := handler.NewAccountHandler(accountService)
 
-	internalBankAccountHandler := handler.NewInternalBankAccountHandler()
+	internalBankAccountHandler := handler.NewInternalBankAccountHandler(accountService)
 
 	echo.Use(middleware.Recover())
 	echo.Use(middleware.RequestLogger())

@@ -1,8 +1,13 @@
 package service
 
 import (
+	"context"
 	"github/t-takamichi/fintech-game/backend/bank/internal/domain"
+	"github/t-takamichi/fintech-game/backend/bank/internal/entity"
 	repository "github/t-takamichi/fintech-game/backend/bank/internal/repository"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // DebtThreshold は口座が債務（負債）と見なされる閾値です。
@@ -10,18 +15,21 @@ const DebtThreshold int64 = 0
 
 type AccountService interface {
 	GetAccountStatus(subjectID string) (domain.AccountStatus, error)
+	CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, error)
 }
 
 type accountService struct {
-	repo repository.AccountRepository
+	accountRepository        repository.AccountRepository
+	accountBalanceRepository repository.AccountBalanceRepository
+	db                       *gorm.DB
 }
 
-func NewAccountService(r repository.AccountRepository) AccountService {
-	return &accountService{repo: r}
+func NewAccountService(r repository.AccountRepository, b repository.AccountBalanceRepository, db *gorm.DB) AccountService {
+	return &accountService{accountRepository: r, accountBalanceRepository: b, db: db}
 }
 
 func (s *accountService) GetAccountStatus(subjectID string) (domain.AccountStatus, error) {
-	m, err := s.repo.GetMasterByID(subjectID)
+	m, err := s.accountRepository.GetMasterByID(subjectID)
 	if err != nil {
 		return domain.AccountStatus{}, err
 	}
@@ -38,5 +46,41 @@ func (s *accountService) GetAccountStatus(subjectID string) (domain.AccountStatu
 		IsFrozen:      m.IsFrozen,
 		CurrentTurn:   m.CurrentTurn,
 		CreditScore:   m.CreditScore,
+	}, nil
+}
+
+func (s *accountService) CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, error) {
+	id := uuid.New()
+	master := entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
+	balance := entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
+
+	var created entity.AccountMaster
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := s.accountRepository.CreateMasterTx(ctx, tx, master); err != nil {
+			return err
+		}
+		if _, err := s.accountBalanceRepository.CreateAccountBalanceTx(ctx, tx, balance); err != nil {
+			return err
+		}
+		// 結果を読み直す（Preload で balance を含める）
+		if err := tx.Preload("AccountBalance").First(&created, "user_id = ?", id).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Account{}, err
+	}
+
+	// created から domain.Account を組み立てて返す
+	return domain.Account{
+		UserID:        created.UserID,
+		Balance:       created.AccountBalance.Balance,
+		LoanPrincipal: created.AccountBalance.LoanPrincipal,
+		NetAsset:      created.AccountBalance.Balance - created.AccountBalance.LoanPrincipal,
+		IsDebt:        created.AccountBalance.LoanPrincipal > 0,
+		IsFrozen:      created.IsFrozen,
+		CurrentTurn:   created.CurrentTurn,
+		CreditScore:   created.CreditScore,
 	}, nil
 }
