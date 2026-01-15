@@ -2,7 +2,6 @@ package domain
 
 import "github.com/google/uuid"
 
-// AccountStatus is a response DTO for account status endpoints.
 type AccountStatus struct {
 	UserID        uuid.UUID `json:"user_id"`
 	Balance       int64     `json:"balance"`

@@ -8,7 +8,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// NewGormDB opens a GORM DB connection and returns the DB handle.
 func NewGormDB(dsn string) (*gorm.DB, error) {
 	dialector := postgres.Open(dsn)
 	gdb, err := gorm.Open(dialector, &gorm.Config{
@@ -22,12 +21,11 @@ func NewGormDB(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// FIXME: 接続プールの設定値を適切なものに調整する
 	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(25)
 	sqlDB.SetConnMaxLifetime(time.Minute * 5)
-
-	// NOTE: schema migrations are managed by SQL migration files and the migrate tool.
-	// Do NOT call AutoMigrate here to avoid schema drift in production.
 
 	return gdb, nil
 }

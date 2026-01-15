@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// AccountRepository defines DB operations for accounts (master/balance split).
 type AccountRepository interface {
 	GetMasterByID(subjectID string) (entity.AccountMaster, error)
 	CreateMasterTx(ctx context.Context, tx *gorm.DB, am entity.AccountMaster) (entity.AccountMaster, error)
