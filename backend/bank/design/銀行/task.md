@@ -8,7 +8,7 @@
 
 ## 2. 【要件】口座の新規開設（0円スタート）
 **目的**: ユーザー登録に連動して、空の口座を用意する。
-- [ ] **内部API実装**: `POST /internal/v1/account/create`
+ - [ ] **内部API実装**: `POST /internal/v1/bank/account/create`
 - [ ] **ロジック**: 残高0、ローン0、スコア3で`Accounts`レコードを作成。履歴は作成しない。
 - [ ] **受け入れ基準**: 指定のUUIDで、残高0の口座がDBに存在すること。
  - **実装箇所（推奨）**:
@@ -18,7 +18,7 @@
 
 ## 3. 【要件】初期ローンの実行（100万円の着金演出）
 **目的**: 0円の口座に原資を振り込み、通帳の1行目を作る。
-- [ ] **内部API実装**: `POST /internal/v1/account/initialize`
+ - [ ] **内部API実装**: `POST /internal/v1/bank/account/initialize`
 - [ ] **ロジック実装**:
         - 同一トランザクション内で `balance += 1,000,000`, `loan_principal += 1,000,000` を実行。
         - `apply_transaction` を通じ、`type: LOAN`, `is_printed: false` で履歴保存。
@@ -32,12 +32,12 @@
 
 ## 4. 【要件】資産ステータスの可視化と演出同期
 **目的**: 「手元にお金はあるが純資産は0」という現実を表示し、印字演出を制御する。
-- [ ] **ステータスAPI**: `GET /api/v1/account/:id/status`
-    - [x] **ステータスAPI**: `GET /api/v1/account/:id/status`
-        - `net_asset` (-115万等の負値) と `is_debt` を計算して返却。
-- [ ] **履歴・演出API**:
-    - `GET /api/v1/account/history`（全履歴取得）
-    - `PATCH /api/v1/account/history/print`（演出完了フラグ更新）
+ - [ ] **ステータスAPI**: `GET /api/v1/bank/account/:id/status`
+     - [x] **ステータスAPI**: `GET /api/v1/bank/account/:id/status`
+          - `net_asset` (-115万等の負値) と `is_debt` を計算して返却。
+ - [ ] **履歴・演出API**:
+     - `GET /api/v1/bank/account/history`（全履歴取得）
+     - `PATCH /api/v1/bank/account/history/print`（演出完了フラグ更新）
  - **実装箇所（推奨）**:
    - 読み取りAPI: `backend/bank/internal/handler/account_handler.go` の読み取りハンドラで `AccountService` を呼ぶ。
    - サービス: `backend/bank/internal/service/account_service.go` の `GetAccountStatus`（既存）を利用。
@@ -45,7 +45,7 @@
 
 ## 5. 【要件】最終精算と信用スコアの確定
 **目的**: 全投資終了後、純資産の成否によってスコアを変動させ、1なら凍結する。
-- [ ] **精算API実装**: `POST /internal/v1/account/settle`
+ - [ ] **精算API実装**: `POST /internal/v1/bank/account/settle`
 - [ ] **ロジック**: 
     - `net_asset` が正ならスコア加算、負ならスコア減算（-2）。
     - スコア1で `is_frozen = true` へ更新。
