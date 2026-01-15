@@ -65,7 +65,9 @@ func main() {
 
 	echo.GET("/", hello)
 
-	echo.GET("/account/:id/status", accountHandler.GetAccountStatusHandler)
+	bank := echo.Group("/api/bank")
+
+	bank.GET("/account/:id/status", accountHandler.GetAccountStatusHandler)
 
 	// Start server
 	if err := echo.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
