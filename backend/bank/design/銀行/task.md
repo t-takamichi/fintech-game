@@ -11,10 +11,6 @@
  - [ ] **内部API実装**: `POST /internal/bank-accounts/create`
 - [ ] **ロジック**: 残高0、ローン0、スコア3で`Accounts`レコードを作成。履歴は作成しない。
 - [ ] **受け入れ基準**: 指定のUUIDで、残高0の口座がDBに存在すること。
- - **実装箇所（推奨）**:
-     - ハンドラ: `backend/bank/internal/handler/account_handler.go` の内部APIハンドラでリクエスト受け取り。
-     - サービス: `backend/bank/internal/service` 内の `AccountService` 実装でビジネスロジック（バリデーション、初期値セット）。
-     - リポジトリ: `backend/bank/internal/repository` の既存の作成メソッドを呼んでレコード作成。
 
 ## 3. 【要件】初期ローンの実行（100万円の着金演出）
 **目的**: 0円の口座に原資を振り込み、通帳の1行目を作る。
@@ -23,12 +19,7 @@
         - 同一トランザクション内で `balance += 1,000,000`, `loan_principal += 1,000,000` を実行。
         - `apply_transaction` を通じ、`type: LOAN`, `is_printed: false` で履歴保存。
 - [ ] **受け入れ基準**: 実行後、`status`APIで残高100万、`history`APIで未印字の履歴が1件返ること。
- - **実装箇所（推奨）**:
-     - ハンドラ: `backend/bank/internal/handler/account_handler.go` の `initialize` エンドポイントでリクエストを受け取る。
-     - サービス: `backend/bank/internal/service/account_service.go` にてトランザクションを開始（`db.Begin()` または `db.Transaction(...)`）、同一 `tx` 上で残高更新と `loan_principal` の更新を行うロジックを実装。
-        - サービス内で `repo` の更新メソッドを呼ぶ（`UpdateBalance`, `UpdateLoanPrincipal` または機能内の直接クエリ）。
-        - 同一 `tx` 上で `CreateTransaction(tx, tr)` を呼んで履歴挿入。
-    - リポジトリ: `backend/bank/internal/repository` に履歴挿入用の `CreateTransaction(tx *gorm.DB, tr *entity.Transaction) error` を用意しておく（機能内で最初に実装）。
+ 
 
 ## 4. 【要件】資産ステータスの可視化と演出同期
 **目的**: 「手元にお金はあるが純資産は0」という現実を表示し、印字演出を制御する。
@@ -38,10 +29,7 @@
  - [ ] **履歴・演出API**:
      - `GET /api/v1/bank/account/history`（全履歴取得）
      - `PATCH /api/v1/bank/account/history/print`（演出完了フラグ更新）
- - **実装箇所（推奨）**:
-   - 読み取りAPI: `backend/bank/internal/handler/account_handler.go` の読み取りハンドラで `AccountService` を呼ぶ。
-   - サービス: `backend/bank/internal/service/account_service.go` の `GetAccountStatus`（既存）を利用。
-   - 履歴印字更新: `PATCH` はハンドラ→サービス→リポジトリの流れで `Update` を行う（必要があれば `tx` を用いるが、残高変動を伴わないなら単純更新で可）。
+ 
 
 ## 5. 【要件】最終精算と信用スコアの確定
 **目的**: 全投資終了後、純資産の成否によってスコアを変動させ、1なら凍結する。
@@ -50,10 +38,6 @@
     - `net_asset` が正ならスコア加算、負ならスコア減算（-2）。
     - スコア1で `is_frozen = true` へ更新。
 - [ ] **受け入れ基準**: 債務超過時にスコアが下がり、口座が操作不能（凍結）になること。
- - **実装箇所（推奨）**:
-     - ハンドラ: `backend/bank/internal/handler/account_handler.go` の `settle` エンドポイント。
-    - サービス: `backend/bank/internal/service/account_service.go` 内でトランザクション開始。`net_asset` 計算、スコア変更、`is_frozen` 更新、そして必要なら残高調整（`AdjustBalance` 処理）と `CreateTransaction` を同一 `tx` 上で行う。
-     - リポジトリ: スコア更新や `is_frozen` 更新のためのメソッドを `backend/bank/internal/repository` に実装。
 
 ---
 
