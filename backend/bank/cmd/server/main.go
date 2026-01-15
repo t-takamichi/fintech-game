@@ -19,7 +19,7 @@ func main() {
 
 	echo := echo.New()
 
-	// Initialize DB (prefer DATABASE_URL, otherwise build DSN from POSTGRES_* vars)
+	// FIXME: DB接続まわり初期化処理を分離したい
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		host := os.Getenv("POSTGRES_HOST")
@@ -68,6 +68,8 @@ func main() {
 		port = "8080"
 	}
 
+	// FIXME: ルーティング設定を分離したい
+
 	echo.GET("/", hello)
 
 	bank := echo.Group("/api/bank")
@@ -75,6 +77,8 @@ func main() {
 
 	internal := echo.Group("/internal/bank-accounts")
 	internal.POST("/Create", internalBankAccountHandler.Create)
+
+	// TODO: グローバルでエラーハンドリングできるようにしたい
 
 	// Start server
 	if err := echo.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {

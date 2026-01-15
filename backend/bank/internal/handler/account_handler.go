@@ -19,6 +19,7 @@ func NewAccountHandler(svc service.AccountService) *AccountHandler {
 func (h *AccountHandler) GetAccountStatusHandler(c echo.Context) error {
 	subjectID := c.Param("id")
 	status, err := h.svc.GetAccountStatus(subjectID)
+	// FIXME: エラーハンドリングを改善する
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}

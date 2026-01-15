@@ -23,12 +23,14 @@ func NewInternalBankAccountHandler(svc service.AccountService) *InternalBankAcco
 func (h *InternalBankAccountHandler) Create(c echo.Context) error {
 
 	var req RequestCreateAccount
+	// FIXME: バリデーションを追加する
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
 	}
 
 	context := c.Request().Context()
 	account, err := h.svc.CreateAccount(context, req.SubjectID, req.InitialScore)
+	// FIXME: エラーハンドリングを改善する
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 
