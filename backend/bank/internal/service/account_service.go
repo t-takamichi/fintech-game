@@ -32,7 +32,14 @@ func NewAccountService(r repository.AccountRepository, b repository.AccountBalan
 func (s *accountService) GetAccountStatus(subjectID string) (domain.AccountStatus, error) {
 	m, err := s.accountRepository.GetMasterByID(subjectID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.AccountStatus{}, errors.New("account not found")
+		}
 		return domain.AccountStatus{}, err
+	}
+	if m == nil {
+		// mがnilの場合の処理ってそもそもNotFoundエラーにじゃあないよ。だってErrRecordNotFoundは上でキャッチしてるし,どちらかというとシステムエラーじゃないの？
+		return domain.AccountStatus{}, errors.New("account not found")
 	}
 
 	netAsset := m.AccountBalance.Balance - m.AccountBalance.LoanPrincipal
@@ -61,19 +68,19 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 
 	// FIXME: UUID生成を外部から注入できるようにする
 	id := uuid.New()
-	master := entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
-	balance := entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
+	master := &entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
+	balance := &entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
 
-	var created entity.AccountMaster
+	var created *entity.AccountMaster
 	// FIXME: エラーハンドリングを改善する。
 	// FIXME: トランザクションの扱いをRepository層に移すべきか検討する。
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if _, err := s.accountRepository.CreateMasterTx(ctx, tx, master); err != nil {
-			return err
 		}
 		if _, err := s.accountBalanceRepository.CreateAccountBalanceTx(ctx, tx, balance); err != nil {
 			return err
 		}
+
 		if err := tx.Preload("AccountBalance").First(&created, "user_id = ?", id).Error; err != nil {
 			return err
 		}

@@ -8,7 +8,7 @@ import (
 )
 
 type AccountBalanceRepository interface {
-	CreateAccountBalanceTx(ctx context.Context, tx *gorm.DB, ab entity.AccountBalance) (entity.AccountBalance, error)
+	CreateAccountBalanceTx(ctx context.Context, tx *gorm.DB, ab *entity.AccountBalance) (*entity.AccountBalance, error)
 }
 
 type gormAccountBalanceRepository struct {
@@ -19,10 +19,9 @@ func NewAccountBalanceRepository(db *gorm.DB) AccountBalanceRepository {
 	return &gormAccountBalanceRepository{db: db}
 }
 
-func (r *gormAccountBalanceRepository) CreateAccountBalanceTx(ctx context.Context, tx *gorm.DB, ab entity.AccountBalance) (entity.AccountBalance, error) {
-
-	if err := tx.WithContext(ctx).Create(&ab).Error; err != nil {
-		return entity.AccountBalance{}, err
+func (r *gormAccountBalanceRepository) CreateAccountBalanceTx(ctx context.Context, tx *gorm.DB, ab *entity.AccountBalance) (*entity.AccountBalance, error) {
+	if err := tx.WithContext(ctx).Create(ab).Error; err != nil {
+		return nil, err
 	}
 	return ab, nil
 }
