@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+
 	"github/t-takamichi/fintech-game/backend/bank/internal/domain"
 	"github/t-takamichi/fintech-game/backend/bank/internal/entity"
 	repository "github/t-takamichi/fintech-game/backend/bank/internal/repository"
@@ -12,7 +13,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// DebtThreshold は口座が債務（負債）と見なされる閾値です。
 const DebtThreshold int64 = 0
 
 type AccountService interface {
@@ -32,7 +32,7 @@ type accountService struct {
 	accountBalanceRepository repository.AccountBalanceRepository
 	transactionRepository    repository.TransactionRepository
 	db                       *gorm.DB
-	uuidGenerator            func() uuid.UUID // 外部注入可能なUUIDジェネレータ
+	uuidGenerator            func() uuid.UUID
 }
 
 func NewAccountService(r repository.AccountRepository, b repository.AccountBalanceRepository, t repository.TransactionRepository, db *gorm.DB) AccountService {
@@ -41,8 +41,56 @@ func NewAccountService(r repository.AccountRepository, b repository.AccountBalan
 		accountBalanceRepository: b,
 		transactionRepository:    t,
 		db:                       db,
-		uuidGenerator:            uuid.New, // デフォルトで uuid.New を使用
+		uuidGenerator:            uuid.New,
 	}
+}
+
+// withTx トランザクション処理とエラーハンドリングの共通ラッパー
+func (s *accountService) withTx(ctx context.Context, fn func(tx *gorm.DB) error) *domain.BankAccountError {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(tx)
+	})
+	if err != nil {
+		var berr *domain.BankAccountError
+		if errors.As(err, &berr) {
+			return berr
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.NewBankAccountError(domain.ErrorTypeNotFound, "resource not found")
+		}
+		return domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+	}
+	return nil
+}
+
+// getMasterForUpdate ロック付きでマスタを安全に取得する共通ヘルパー
+func (s *accountService) getMasterForUpdate(ctx context.Context, tx *gorm.DB, subjectID string) (*entity.AccountMaster, error) {
+	master, err := s.accountRepository.GetMasterForUpdateTx(ctx, tx, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	if master == nil {
+		return nil, domain.NewBankAccountError(domain.ErrorTypeNotFound, "account not found")
+	}
+	if master.AccountBalance == nil {
+		return nil, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account balance is nil")
+	}
+	return master, nil
+}
+
+// checkIdempotency べき等キーの重複チェック
+func (s *accountService) checkIdempotency(ctx context.Context, tx *gorm.DB, key *uuid.UUID) (bool, error) {
+	if key == nil {
+		return false, nil
+	}
+	exist, err := s.transactionRepository.GetTransactionByIdempotencyKeyTx(ctx, tx, *key)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return exist != nil, nil
 }
 
 func (s *accountService) GetAccountStatus(ctx context.Context, subjectID string) (domain.AccountStatus, *domain.BankAccountError) {
@@ -53,23 +101,17 @@ func (s *accountService) GetAccountStatus(ctx context.Context, subjectID string)
 		}
 		return domain.AccountStatus{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
 	}
-	if m == nil {
-		return domain.AccountStatus{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account master is nil")
-	}
-
-	if m.AccountBalance == nil {
-		return domain.AccountStatus{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account balance is nil")
+	if m == nil || m.AccountBalance == nil {
+		return domain.AccountStatus{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "invalid account state")
 	}
 
 	netAsset := m.AccountBalance.Balance - m.AccountBalance.LoanPrincipal
-	isDebt := m.AccountBalance.LoanPrincipal > 0
-
 	return domain.AccountStatus{
 		UserID:        m.UserID,
 		Balance:       m.AccountBalance.Balance,
 		LoanPrincipal: m.AccountBalance.LoanPrincipal,
 		NetAsset:      netAsset,
-		IsDebt:        isDebt,
+		IsDebt:        m.AccountBalance.LoanPrincipal > 0,
 		IsFrozen:      m.IsFrozen,
 		CurrentTurn:   m.CurrentTurn,
 		CreditScore:   m.CreditScore,
@@ -77,7 +119,6 @@ func (s *accountService) GetAccountStatus(ctx context.Context, subjectID string)
 }
 
 func (s *accountService) CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, *domain.BankAccountError) {
-	// 口座作成パラメータのバリデーション
 	if subjectID == "" {
 		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "subject_id is required")
 	}
@@ -89,56 +130,43 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 	if verr == nil {
 		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeAlreadyExists, "account already exists")
 	}
-	if verr != nil && !errors.Is(verr, gorm.ErrRecordNotFound) {
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, verr.Error())
-	}
 
 	id := s.uuidGenerator()
 	master := &entity.AccountMaster{UserID: id, SubjectID: subjectID, CreditScore: initialScore, IsFrozen: false, CurrentTurn: 0}
 	balance := &entity.AccountBalance{UserID: id, Balance: 0, LoanPrincipal: 0}
 
-	var created *entity.AccountMaster
-	// トランザクションの範囲は、複数リポジトリの整合性を保つためサービス層で制御する設計方針とする。
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.withTx(ctx, func(tx *gorm.DB) error {
 		if _, err := s.accountRepository.CreateMasterTx(ctx, tx, master); err != nil {
 			return err
 		}
 		if _, err := s.accountBalanceRepository.CreateAccountBalanceTx(ctx, tx, balance); err != nil {
 			return err
 		}
-
-		if err := tx.Preload("AccountBalance").First(&created, "user_id = ?", id).Error; err != nil {
-			return err
-		}
 		return nil
 	})
 	if err != nil {
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		return domain.Account{}, err
 	}
 
-	return toDomainAccount(created), nil
+	master.AccountBalance = balance
+	return toDomainAccount(master), nil
 }
 
 func (s *accountService) InitializeAccount(ctx context.Context, subjectID string, idempotencyKey *uuid.UUID) (domain.Account, *domain.BankAccountError) {
-	var updatedMaster *entity.AccountMaster
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// FOR UPDATE ロックをかけてマスター取得（並行処理からのデータ競合を防止）
-		master, err := s.accountRepository.GetMasterForUpdateTx(ctx, tx, subjectID)
+	var master *entity.AccountMaster
+	err := s.withTx(ctx, func(tx *gorm.DB) error {
+		var err error
+		master, err = s.getMasterForUpdate(ctx, tx, subjectID)
 		if err != nil {
 			return err
 		}
 
-		// べき等性の検証
-		if idempotencyKey != nil {
-			exist, err := s.transactionRepository.GetTransactionByIdempotencyKeyTx(ctx, tx, *idempotencyKey)
-			if err == nil && exist != nil {
-				// すでに同一キーで登録済みの場合は、何もせず現在の状態をロードして終了
-				updatedMaster = master
-				return nil
-			}
+		if duplicate, err := s.checkIdempotency(ctx, tx, idempotencyKey); err != nil {
+			return err
+		} else if duplicate {
+			return nil
 		}
 
-		// すでに初期ローンが実行されているか確認
 		if master.AccountBalance.LoanPrincipal > 0 {
 			return domain.NewBankAccountError(domain.ErrorTypeAlreadyExists, "account already initialized with loan")
 		}
@@ -151,7 +179,6 @@ func (s *accountService) InitializeAccount(ctx context.Context, subjectID string
 			return err
 		}
 
-		// transaction 履歴を保存
 		t := &entity.Transaction{
 			UserID:         master.UserID,
 			Type:           "LOAN",
@@ -165,25 +192,13 @@ func (s *accountService) InitializeAccount(ctx context.Context, subjectID string
 			return err
 		}
 
-		// 最新データをロード
-		if err := tx.Preload("AccountBalance").First(&updatedMaster, "user_id = ?", master.UserID).Error; err != nil {
-			return err
-		}
 		return nil
 	})
-
 	if err != nil {
-		var berr *domain.BankAccountError
-		if errors.As(err, &berr) {
-			return domain.Account{}, berr
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeNotFound, "account not found")
-		}
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		return domain.Account{}, err
 	}
 
-	return toDomainAccount(updatedMaster), nil
+	return toDomainAccount(master), nil
 }
 
 func (s *accountService) GetAccountHistory(ctx context.Context, subjectID string) ([]domain.Transaction, *domain.BankAccountError) {
@@ -207,69 +222,50 @@ func (s *accountService) GetAccountHistory(ctx context.Context, subjectID string
 }
 
 func (s *accountService) MarkAsPrinted(ctx context.Context, subjectID string, ids []int64) *domain.BankAccountError {
-	master, err := s.accountRepository.GetMasterByID(ctx, subjectID)
+	_, err := s.accountRepository.GetMasterByID(ctx, subjectID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.NewBankAccountError(domain.ErrorTypeNotFound, "account not found")
 		}
 		return domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
 	}
-	if master == nil {
-		return domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account master is nil")
-	}
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	return s.withTx(ctx, func(tx *gorm.DB) error {
 		return s.transactionRepository.MarkAsPrintedTx(ctx, tx, ids)
 	})
-	if err != nil {
-		return domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
-	}
-
-	return nil
 }
 
 func (s *accountService) SettleAccount(ctx context.Context, subjectID string) (domain.Account, *domain.BankAccountError) {
-	master, err := s.accountRepository.GetMasterByID(ctx, subjectID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeNotFound, "account not found")
+	var master *entity.AccountMaster
+	err := s.withTx(ctx, func(tx *gorm.DB) error {
+		var err error
+		master, err = s.getMasterForUpdate(ctx, tx, subjectID)
+		if err != nil {
+			return err
 		}
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
-	}
-	if master == nil {
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account master is nil")
-	}
-	if master.AccountBalance == nil {
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account balance is nil")
-	}
 
-	netAsset := master.AccountBalance.Balance - master.AccountBalance.LoanPrincipal
-	score := master.CreditScore
-	if netAsset >= 0 {
-		score += 1
-	} else {
-		score -= 2
-	}
+		netAsset := master.AccountBalance.Balance - master.AccountBalance.LoanPrincipal
+		score := master.CreditScore
+		if netAsset >= 0 {
+			score += 1
+		} else {
+			score -= 2
+		}
 
-	if score > 10 {
-		score = 10
-	}
-	if score < 1 {
-		score = 1
-	}
+		if score > 10 {
+			score = 10
+		}
+		if score < 1 {
+			score = 1
+		}
 
-	isFrozen := score <= 1
-
-	var updatedMaster *entity.AccountMaster
-	err = s.db.Transaction(func(tx *gorm.DB) error {
 		master.CreditScore = score
-		master.IsFrozen = isFrozen
+		master.IsFrozen = (score <= 1)
 
 		if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, master); err != nil {
 			return err
 		}
 
-		// SETTLE 取引を記録
 		t := &entity.Transaction{
 			UserID:       master.UserID,
 			Type:         "SETTLE",
@@ -282,40 +278,31 @@ func (s *accountService) SettleAccount(ctx context.Context, subjectID string) (d
 			return err
 		}
 
-		if err := tx.Preload("AccountBalance").First(&updatedMaster, "user_id = ?", master.UserID).Error; err != nil {
-			return err
-		}
 		return nil
 	})
-
 	if err != nil {
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		return domain.Account{}, err
 	}
 
-	return toDomainAccount(updatedMaster), nil
+	return toDomainAccount(master), nil
 }
 
 func (s *accountService) ExecuteTransaction(ctx context.Context, subjectID string, amount int64, txType string, desc string, idempotencyKey *uuid.UUID) (domain.Account, *domain.BankAccountError) {
-	var updatedMaster *entity.AccountMaster
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// FOR UPDATE ロックをかけてマスター取得（並行アクセス時の競合を防ぐ）
-		master, err := s.accountRepository.GetMasterForUpdateTx(ctx, tx, subjectID)
+	var master *entity.AccountMaster
+	err := s.withTx(ctx, func(tx *gorm.DB) error {
+		var err error
+		master, err = s.getMasterForUpdate(ctx, tx, subjectID)
 		if err != nil {
 			return err
 		}
-
 		if master.IsFrozen {
 			return domain.NewBankAccountError(domain.ErrorTypeInconsistent, "account is frozen")
 		}
 
-		// べき等性の検証
-		if idempotencyKey != nil {
-			exist, err := s.transactionRepository.GetTransactionByIdempotencyKeyTx(ctx, tx, *idempotencyKey)
-			if err == nil && exist != nil {
-				// すでに同一キーで登録済みの場合は、何もせず現在の状態をロードして終了
-				updatedMaster = master
-				return nil
-			}
+		if duplicate, err := s.checkIdempotency(ctx, tx, idempotencyKey); err != nil {
+			return err
+		} else if duplicate {
+			return nil
 		}
 
 		actualAmount := amount
@@ -348,30 +335,19 @@ func (s *accountService) ExecuteTransaction(ctx context.Context, subjectID strin
 			return err
 		}
 
-		if err := tx.Preload("AccountBalance").First(&updatedMaster, "user_id = ?", master.UserID).Error; err != nil {
-			return err
-		}
 		return nil
 	})
-
 	if err != nil {
-		var berr *domain.BankAccountError
-		if errors.As(err, &berr) {
-			return domain.Account{}, berr
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeNotFound, "account not found")
-		}
-		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		return domain.Account{}, err
 	}
 
-	return toDomainAccount(updatedMaster), nil
+	return toDomainAccount(master), nil
 }
 
 func (s *accountService) ApplyInterestBatch(ctx context.Context) *domain.BankAccountError {
 	limit := 100
 	offset := 0
-	ns := uuid.MustParse("00000000-0000-0000-0000-000000000000") // 固定ネームスペース
+	ns := uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
 	for {
 		masters, err := s.accountRepository.GetMastersPage(ctx, limit, offset)
@@ -382,20 +358,21 @@ func (s *accountService) ApplyInterestBatch(ctx context.Context) *domain.BankAcc
 			break
 		}
 
-		err = s.db.Transaction(func(tx *gorm.DB) error {
-			for _, m := range masters {
+		berr := s.withTx(ctx, func(tx *gorm.DB) error {
+			for i := range masters {
+				m := &masters[i]
 				if m.AccountBalance == nil || m.IsFrozen {
 					continue
 				}
 				if m.AccountBalance.LoanPrincipal > 0 {
-					// 決定論的べき等キーの生成
 					data := m.UserID.String() + "-interest-turn-" + strconv.Itoa(m.CurrentTurn)
 					idempKey := uuid.NewSHA1(ns, []byte(data))
 
-					// すでに同一キーの利息加算取引が存在するかチェック
-					exist, err := s.transactionRepository.GetTransactionByIdempotencyKeyTx(ctx, tx, idempKey)
-					if err == nil && exist != nil {
-						// すでに適用済みの場合はスキップ
+					duplicate, err := s.checkIdempotency(ctx, tx, &idempKey)
+					if err != nil {
+						return err
+					}
+					if duplicate {
 						continue
 					}
 
@@ -423,8 +400,8 @@ func (s *accountService) ApplyInterestBatch(ctx context.Context) *domain.BankAcc
 			}
 			return nil
 		})
-		if err != nil {
-			return domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		if berr != nil {
+			return berr
 		}
 
 		if len(masters) < limit {
@@ -450,8 +427,9 @@ func (s *accountService) ReconcileAccountsBatch(ctx context.Context) ([]uuid.UUI
 			break
 		}
 
-		err = s.db.Transaction(func(tx *gorm.DB) error {
-			for _, m := range masters {
+		berr := s.withTx(ctx, func(tx *gorm.DB) error {
+			for i := range masters {
+				m := &masters[i]
 				if m.AccountBalance == nil {
 					continue
 				}
@@ -464,15 +442,15 @@ func (s *accountService) ReconcileAccountsBatch(ctx context.Context) ([]uuid.UUI
 				if sum != m.AccountBalance.Balance {
 					inconsistentUserIDs = append(inconsistentUserIDs, m.UserID)
 					m.IsFrozen = true
-					if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, &m); err != nil {
+					if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, m); err != nil {
 						return err
 					}
 				}
 			}
 			return nil
 		})
-		if err != nil {
-			return nil, domain.NewBankAccountError(domain.ErrorTypeInconsistent, err.Error())
+		if berr != nil {
+			return nil, berr
 		}
 
 		if len(masters) < limit {
