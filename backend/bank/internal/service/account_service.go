@@ -296,11 +296,13 @@ func (s *accountService) ExecuteTransaction(ctx context.Context, subjectID strin
 		}
 
 		actualAmount := amount
+		actualTxType := txType
 		if txType == "REPAYMENT" {
 			repayAmount := min(-amount, master.AccountBalance.LoanPrincipal)
 			master.AccountBalance.Balance -= repayAmount
 			master.AccountBalance.LoanPrincipal -= repayAmount
 			actualAmount = -repayAmount
+			actualTxType = "LOAN"
 		} else {
 			master.AccountBalance.Balance += amount
 		}
@@ -311,7 +313,7 @@ func (s *accountService) ExecuteTransaction(ctx context.Context, subjectID strin
 
 		t := &entity.Transaction{
 			UserID:         master.UserID,
-			Type:           txType,
+			Type:           actualTxType,
 			Amount:         actualAmount,
 			BalanceAfter:   master.AccountBalance.Balance,
 			Description:    desc,
