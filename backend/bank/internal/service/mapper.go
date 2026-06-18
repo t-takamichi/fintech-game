@@ -39,3 +39,16 @@ func toDomainAccount(created *entity.AccountMaster) domain.Account {
 		CreditScore:   created.CreditScore,
 	}
 }
+
+func toDomainAccountStatus(m *entity.AccountMaster) domain.AccountStatus {
+	return domain.AccountStatus{
+		UserID:        m.UserID,
+		Balance:       m.AccountBalance.Balance,
+		LoanPrincipal: m.AccountBalance.LoanPrincipal,
+		NetAsset:      m.AccountBalance.Balance - m.AccountBalance.LoanPrincipal,
+		IsDebt:        m.AccountBalance.LoanPrincipal > 0,
+		IsFrozen:      m.IsFrozen,
+		CurrentTurn:   m.CurrentTurn,
+		CreditScore:   m.CreditScore,
+	}
+}

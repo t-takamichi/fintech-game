@@ -24,7 +24,6 @@ func NewGormDB(dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// 接続プールの設定値を環境変数から調整できるようにする（デフォルトは25）
 	maxOpen := 25
 	if mo := os.Getenv("DB_MAX_OPEN_CONNS"); mo != "" {
 		if val, err := strconv.Atoi(mo); err == nil {
