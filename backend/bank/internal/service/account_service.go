@@ -13,8 +13,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const DebtThreshold int64 = 0
-
 type AccountService interface {
 	GetAccountStatus(ctx context.Context, subjectID string) (domain.AccountStatus, *domain.BankAccountError)
 	CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, *domain.BankAccountError)
@@ -45,7 +43,6 @@ func NewAccountService(r repository.AccountRepository, b repository.AccountBalan
 	}
 }
 
-// withTx トランザクション処理とエラーハンドリングの共通ラッパー
 func (s *accountService) withTx(ctx context.Context, fn func(tx *gorm.DB) error) *domain.BankAccountError {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(tx)
@@ -63,7 +60,6 @@ func (s *accountService) withTx(ctx context.Context, fn func(tx *gorm.DB) error)
 	return nil
 }
 
-// getMasterForUpdate ロック付きでマスタを安全に取得する共通ヘルパー
 func (s *accountService) getMasterForUpdate(ctx context.Context, tx *gorm.DB, subjectID string) (*entity.AccountMaster, error) {
 	master, err := s.accountRepository.GetMasterForUpdateTx(ctx, tx, subjectID)
 	if err != nil {
@@ -78,7 +74,6 @@ func (s *accountService) getMasterForUpdate(ctx context.Context, tx *gorm.DB, su
 	return master, nil
 }
 
-// checkIdempotency べき等キーの重複チェック
 func (s *accountService) checkIdempotency(ctx context.Context, tx *gorm.DB, key *uuid.UUID) (bool, error) {
 	if key == nil {
 		return false, nil
@@ -104,18 +99,7 @@ func (s *accountService) GetAccountStatus(ctx context.Context, subjectID string)
 	if m == nil || m.AccountBalance == nil {
 		return domain.AccountStatus{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "invalid account state")
 	}
-
-	netAsset := m.AccountBalance.Balance - m.AccountBalance.LoanPrincipal
-	return domain.AccountStatus{
-		UserID:        m.UserID,
-		Balance:       m.AccountBalance.Balance,
-		LoanPrincipal: m.AccountBalance.LoanPrincipal,
-		NetAsset:      netAsset,
-		IsDebt:        m.AccountBalance.LoanPrincipal > 0,
-		IsFrozen:      m.IsFrozen,
-		CurrentTurn:   m.CurrentTurn,
-		CreditScore:   m.CreditScore,
-	}, nil
+	return toDomainAccountStatus(m), nil
 }
 
 func (s *accountService) CreateAccount(ctx context.Context, subjectID string, initialScore int) (domain.Account, *domain.BankAccountError) {

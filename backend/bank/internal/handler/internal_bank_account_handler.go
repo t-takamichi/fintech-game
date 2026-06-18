@@ -22,6 +22,17 @@ func NewInternalBankAccountHandler(svc service.AccountService) *InternalBankAcco
 	return &InternalBankAccountHandler{svc: svc}
 }
 
+func parseIdempotencyKey(keyStr string) (*uuid.UUID, error) {
+	if keyStr == "" {
+		return nil, nil
+	}
+	parsed, err := uuid.Parse(keyStr)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 func (h *InternalBankAccountHandler) Create(c echo.Context) error {
 	var req RequestCreateAccount
 	if err := c.Bind(&req); err != nil {
@@ -33,7 +44,7 @@ func (h *InternalBankAccountHandler) Create(c echo.Context) error {
 	}
 	initialScore := req.InitialScore
 	if initialScore == 0 {
-		initialScore = 3 // default score is 3 as per task.md
+		initialScore = 3
 	}
 	if initialScore < 1 || initialScore > 10 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "initial_score must be between 1 and 10"})
@@ -68,13 +79,9 @@ func (h *InternalBankAccountHandler) Initialize(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "subject_id is required"})
 	}
 
-	var idempotencyKey *uuid.UUID
-	if req.IdempotencyKey != "" {
-		parsed, err := uuid.Parse(req.IdempotencyKey)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid idempotency_key format"})
-		}
-		idempotencyKey = &parsed
+	idempotencyKey, err := parseIdempotencyKey(req.IdempotencyKey)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid idempotency_key format"})
 	}
 
 	ctx := c.Request().Context()
@@ -124,7 +131,7 @@ func (h *InternalBankAccountHandler) Settle(c echo.Context) error {
 type RequestExecuteTransaction struct {
 	SubjectID      string `json:"subject_id"`
 	Amount         int64  `json:"amount"`
-	Type           string `json:"type"` // BUY, SELL, REPAYMENT, etc.
+	Type           string `json:"type"`
 	Description    string `json:"description"`
 	IdempotencyKey string `json:"idempotency_key"`
 }
@@ -142,13 +149,9 @@ func (h *InternalBankAccountHandler) ExecuteTransaction(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "type is required"})
 	}
 
-	var idempotencyKey *uuid.UUID
-	if req.IdempotencyKey != "" {
-		parsed, err := uuid.Parse(req.IdempotencyKey)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid idempotency_key format"})
-		}
-		idempotencyKey = &parsed
+	idempotencyKey, err := parseIdempotencyKey(req.IdempotencyKey)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid idempotency_key format"})
 	}
 
 	ctx := c.Request().Context()
