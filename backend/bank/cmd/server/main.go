@@ -16,36 +16,13 @@ import (
 )
 
 func main() {
+	echoServer := echo.New()
 
-	echo := echo.New()
+	// グローバルエラーハンドリングの適用
+	echoServer.HTTPErrorHandler = handler.CustomHTTPErrorHandler
 
-	// FIXME: DB接続まわり初期化処理を分離したい
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		host := os.Getenv("POSTGRES_HOST")
-		if host == "" {
-			host = "localhost"
-		}
-		port := os.Getenv("POSTGRES_PORT")
-		if port == "" {
-			port = "5432"
-		}
-		user := os.Getenv("POSTGRES_USER")
-		if user == "" {
-			user = "bank_user"
-		}
-		pass := os.Getenv("POSTGRES_PASSWORD")
-		if pass == "" {
-			pass = "bank_pass"
-		}
-		dbname := os.Getenv("POSTGRES_DB")
-		if dbname == "" {
-			dbname = "bank_db"
-		}
-		dsn = "postgres://" + user + ":" + pass + "@" + host + ":" + port + "/" + dbname + "?sslmode=disable"
-	}
-
-	gdb, err := db.NewGormDB(dsn)
+	// DB接続初期化処理の分離
+	gdb, err := db.InitDBFromEnv()
 	if err != nil {
 		slog.Error("failed to initialize database", "error", err)
 		return
@@ -54,38 +31,25 @@ func main() {
 	// create repository layer backed by GORM
 	accountRepository := repository.NewAccountRepository(gdb)
 	accountBalanceRepository := repository.NewAccountBalanceRepository(gdb)
+	transactionRepository := repository.NewTransactionRepository(gdb)
 
-	accountService := svc.NewAccountService(accountRepository, accountBalanceRepository, gdb)
+	accountService := svc.NewAccountService(accountRepository, accountBalanceRepository, transactionRepository, gdb)
 	accountHandler := handler.NewAccountHandler(accountService)
-
 	internalBankAccountHandler := handler.NewInternalBankAccountHandler(accountService)
 
-	echo.Use(middleware.Recover())
-	echo.Use(middleware.RequestLogger())
+	echoServer.Use(middleware.Recover())
+	echoServer.Use(middleware.RequestLogger())
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	// FIXME: ルーティング設定を分離したい
-
-	echo.GET("/", hello)
-
-	bank := echo.Group("/api/bank")
-	bank.GET("/account/:id/status", accountHandler.GetAccountStatusHandler)
-
-	internal := echo.Group("/internal/bank-accounts")
-	internal.POST("/Create", internalBankAccountHandler.Create)
-
-	// TODO: グローバルでエラーハンドリングできるようにしたい
+	// ルーティング設定の分離
+	handler.RegisterRoutes(echoServer, accountHandler, internalBankAccountHandler)
 
 	// Start server
-	if err := echo.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := echoServer.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("failed to start server", "error", err)
 	}
-}
-
-func hello(c echo.Context) error {
-	return c.String(http.StatusOK, "Hello, World!")
 }
