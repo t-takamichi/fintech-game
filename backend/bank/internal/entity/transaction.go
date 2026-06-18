@@ -13,8 +13,9 @@ type Transaction struct {
 	Amount       int64     `gorm:"column:amount"`
 	BalanceAfter int64     `gorm:"column:balance_after"`
 	Description  string    `gorm:"size:15;column:description"`
-	IsPrinted    bool      `gorm:"column:is_printed;default:false"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
+	IsPrinted      bool       `gorm:"column:is_printed;default:false"`
+	IdempotencyKey *uuid.UUID `gorm:"type:uuid;column:idempotency_key;unique"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
 }
 
 func (Transaction) TableName() string {
