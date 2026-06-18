@@ -4,7 +4,7 @@ import uuid
 subject_id = str(uuid.uuid4())
 print("subject_id:", subject_id)
 
-url = "http://localhost:8080/internal/bank-accounts/Create"
+url = "http://localhost:8080/internal/bank-accounts/create"
 payload = {
     "subject_id": subject_id,
     "initial_score": 3

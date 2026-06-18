@@ -44,9 +44,7 @@ func NewAccountService(r repository.AccountRepository, b repository.AccountBalan
 }
 
 func (s *accountService) withTx(ctx context.Context, fn func(tx *gorm.DB) error) *domain.BankAccountError {
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(tx)
-	})
+	err := s.db.WithContext(ctx).Transaction(fn)
 	if err != nil {
 		var berr *domain.BankAccountError
 		if errors.As(err, &berr) {
@@ -110,9 +108,12 @@ func (s *accountService) CreateAccount(ctx context.Context, subjectID string, in
 		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, "initial_score must be between 1 and 10")
 	}
 
-	_, verr := s.accountRepository.GetMasterByID(ctx, subjectID)
-	if verr == nil {
+	existing, verr := s.accountRepository.GetMasterByID(ctx, subjectID)
+	if verr == nil && existing != nil {
 		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeAlreadyExists, "account already exists")
+	}
+	if verr != nil && !errors.Is(verr, gorm.ErrRecordNotFound) {
+		return domain.Account{}, domain.NewBankAccountError(domain.ErrorTypeInconsistent, verr.Error())
 	}
 
 	id := s.uuidGenerator()
@@ -228,35 +229,40 @@ func (s *accountService) SettleAccount(ctx context.Context, subjectID string) (d
 			return err
 		}
 
+		ns := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+		data := master.UserID.String() + "-settle-turn-" + strconv.Itoa(master.CurrentTurn)
+		idempKey := uuid.NewSHA1(ns, []byte(data))
+
+		duplicate, err := s.checkIdempotency(ctx, tx, &idempKey)
+		if err != nil {
+			return err
+		}
+		if duplicate {
+			return nil
+		}
+
 		netAsset := master.AccountBalance.Balance - master.AccountBalance.LoanPrincipal
 		score := master.CreditScore
 		if netAsset >= 0 {
-			score += 1
+			score++
 		} else {
 			score -= 2
 		}
-
-		if score > 10 {
-			score = 10
-		}
-		if score < 1 {
-			score = 1
-		}
-
-		master.CreditScore = score
-		master.IsFrozen = (score <= 1)
+		master.CreditScore = max(1, min(10, score))
+		master.IsFrozen = (master.CreditScore <= 1)
 
 		if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, master); err != nil {
 			return err
 		}
 
 		t := &entity.Transaction{
-			UserID:       master.UserID,
-			Type:         "SETTLE",
-			Amount:       0,
-			BalanceAfter: master.AccountBalance.Balance,
-			Description:  "最終精算",
-			IsPrinted:    false,
+			UserID:         master.UserID,
+			Type:           "SETTLE",
+			Amount:         0,
+			BalanceAfter:   master.AccountBalance.Balance,
+			Description:    "最終精算",
+			IsPrinted:      false,
+			IdempotencyKey: &idempKey,
 		}
 		if _, err := s.transactionRepository.CreateTransactionTx(ctx, tx, t); err != nil {
 			return err
@@ -291,10 +297,7 @@ func (s *accountService) ExecuteTransaction(ctx context.Context, subjectID strin
 
 		actualAmount := amount
 		if txType == "REPAYMENT" {
-			repayAmount := -amount
-			if repayAmount > master.AccountBalance.LoanPrincipal {
-				repayAmount = master.AccountBalance.LoanPrincipal
-			}
+			repayAmount := min(-amount, master.AccountBalance.LoanPrincipal)
 			master.AccountBalance.Balance -= repayAmount
 			master.AccountBalance.LoanPrincipal -= repayAmount
 			actualAmount = -repayAmount
@@ -344,42 +347,8 @@ func (s *accountService) ApplyInterestBatch(ctx context.Context) *domain.BankAcc
 
 		berr := s.withTx(ctx, func(tx *gorm.DB) error {
 			for i := range masters {
-				m := &masters[i]
-				if m.AccountBalance == nil || m.IsFrozen {
-					continue
-				}
-				if m.AccountBalance.LoanPrincipal > 0 {
-					data := m.UserID.String() + "-interest-turn-" + strconv.Itoa(m.CurrentTurn)
-					idempKey := uuid.NewSHA1(ns, []byte(data))
-
-					duplicate, err := s.checkIdempotency(ctx, tx, &idempKey)
-					if err != nil {
-						return err
-					}
-					if duplicate {
-						continue
-					}
-
-					interest := int64(float64(m.AccountBalance.LoanPrincipal) * 0.10)
-					if interest > 0 {
-						m.AccountBalance.LoanPrincipal += interest
-						if _, err := s.accountBalanceRepository.UpdateAccountBalanceTx(ctx, tx, m.AccountBalance); err != nil {
-							return err
-						}
-
-						t := &entity.Transaction{
-							UserID:         m.UserID,
-							Type:           "INTEREST",
-							Amount:         0,
-							BalanceAfter:   m.AccountBalance.Balance,
-							Description:    "利息加算",
-							IsPrinted:      false,
-							IdempotencyKey: &idempKey,
-						}
-						if _, err := s.transactionRepository.CreateTransactionTx(ctx, tx, t); err != nil {
-							return err
-						}
-					}
+				if err := s.applyInterest(ctx, tx, &masters[i], ns); err != nil {
+					return err
 				}
 			}
 			return nil
@@ -395,6 +364,45 @@ func (s *accountService) ApplyInterestBatch(ctx context.Context) *domain.BankAcc
 	}
 
 	return nil
+}
+
+func (s *accountService) applyInterest(ctx context.Context, tx *gorm.DB, m *entity.AccountMaster, ns uuid.UUID) error {
+	if m.AccountBalance == nil || m.IsFrozen || m.AccountBalance.LoanPrincipal <= 0 {
+		return nil
+	}
+
+	data := m.UserID.String() + "-interest-turn-" + strconv.Itoa(m.CurrentTurn)
+	idempKey := uuid.NewSHA1(ns, []byte(data))
+
+	duplicate, err := s.checkIdempotency(ctx, tx, &idempKey)
+	if err != nil {
+		return err
+	}
+	if duplicate {
+		return nil
+	}
+
+	interest := int64(float64(m.AccountBalance.LoanPrincipal) * 0.10)
+	if interest <= 0 {
+		return nil
+	}
+
+	m.AccountBalance.LoanPrincipal += interest
+	if _, err := s.accountBalanceRepository.UpdateAccountBalanceTx(ctx, tx, m.AccountBalance); err != nil {
+		return err
+	}
+
+	t := &entity.Transaction{
+		UserID:         m.UserID,
+		Type:           "INTEREST",
+		Amount:         0,
+		BalanceAfter:   m.AccountBalance.Balance,
+		Description:    "利息加算",
+		IsPrinted:      false,
+		IdempotencyKey: &idempKey,
+	}
+	_, err = s.transactionRepository.CreateTransactionTx(ctx, tx, t)
+	return err
 }
 
 func (s *accountService) ReconcileAccountsBatch(ctx context.Context) ([]uuid.UUID, *domain.BankAccountError) {
@@ -413,22 +421,12 @@ func (s *accountService) ReconcileAccountsBatch(ctx context.Context) ([]uuid.UUI
 
 		berr := s.withTx(ctx, func(tx *gorm.DB) error {
 			for i := range masters {
-				m := &masters[i]
-				if m.AccountBalance == nil {
-					continue
-				}
-
-				sum, err := s.transactionRepository.GetTransactionSumByUserID(ctx, m.UserID)
+				inconsistent, err := s.reconcileAccount(ctx, tx, &masters[i])
 				if err != nil {
 					return err
 				}
-
-				if sum != m.AccountBalance.Balance {
-					inconsistentUserIDs = append(inconsistentUserIDs, m.UserID)
-					m.IsFrozen = true
-					if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, m); err != nil {
-						return err
-					}
+				if inconsistent {
+					inconsistentUserIDs = append(inconsistentUserIDs, masters[i].UserID)
 				}
 			}
 			return nil
@@ -444,4 +442,25 @@ func (s *accountService) ReconcileAccountsBatch(ctx context.Context) ([]uuid.UUI
 	}
 
 	return inconsistentUserIDs, nil
+}
+
+func (s *accountService) reconcileAccount(ctx context.Context, tx *gorm.DB, m *entity.AccountMaster) (bool, error) {
+	if m.AccountBalance == nil {
+		return false, nil
+	}
+
+	sum, err := s.transactionRepository.GetTransactionSumByUserID(ctx, m.UserID)
+	if err != nil {
+		return false, err
+	}
+
+	if sum == m.AccountBalance.Balance {
+		return false, nil
+	}
+
+	m.IsFrozen = true
+	if _, err := s.accountRepository.UpdateMasterTx(ctx, tx, m); err != nil {
+		return false, err
+	}
+	return true, nil
 }

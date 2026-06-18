@@ -43,8 +43,7 @@ func (r *gormAccountRepo) GetMasterForUpdateTx(ctx context.Context, tx *gorm.DB,
 }
 
 func (r *gormAccountRepo) CreateMasterTx(ctx context.Context, tx *gorm.DB, am *entity.AccountMaster) (*entity.AccountMaster, error) {
-	err := tx.WithContext(ctx).Create(am).Error
-	if err != nil {
+	if err := tx.WithContext(ctx).Create(am).Error; err != nil {
 		return nil, err
 	}
 	return am, nil
@@ -67,7 +66,7 @@ func (r *gormAccountRepo) GetAllMasters(ctx context.Context) ([]entity.AccountMa
 
 func (r *gormAccountRepo) GetMastersPage(ctx context.Context, limit, offset int) ([]entity.AccountMaster, error) {
 	var list []entity.AccountMaster
-	if err := r.db.WithContext(ctx).Limit(limit).Offset(offset).Preload("AccountBalance").Find(&list).Error; err != nil {
+	if err := r.db.WithContext(ctx).Limit(limit).Offset(offset).Order("user_id ASC").Preload("AccountBalance").Find(&list).Error; err != nil {
 		return nil, err
 	}
 	return list, nil
