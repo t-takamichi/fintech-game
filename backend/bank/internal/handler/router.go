@@ -17,7 +17,6 @@ func RegisterRoutes(e *echo.Echo, accountHandler *AccountHandler, internalBankAc
 	bank.PATCH("/account/:id/history/print", accountHandler.MarkAsPrintedHandler)
 
 	internal := e.Group("/internal/bank-accounts")
-	internal.POST("/Create", internalBankAccountHandler.Create)
 	internal.POST("/create", internalBankAccountHandler.Create)
 	internal.POST("/initialize", internalBankAccountHandler.Initialize)
 	internal.POST("/settle", internalBankAccountHandler.Settle)

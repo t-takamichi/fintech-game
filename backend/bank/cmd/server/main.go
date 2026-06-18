@@ -17,18 +17,14 @@ import (
 
 func main() {
 	echoServer := echo.New()
-
-	// グローバルエラーハンドリングの適用
 	echoServer.HTTPErrorHandler = handler.CustomHTTPErrorHandler
 
-	// DB接続初期化処理の分離
 	gdb, err := db.InitDBFromEnv()
 	if err != nil {
 		slog.Error("failed to initialize database", "error", err)
 		return
 	}
 
-	// create repository layer backed by GORM
 	accountRepository := repository.NewAccountRepository(gdb)
 	accountBalanceRepository := repository.NewAccountBalanceRepository(gdb)
 	transactionRepository := repository.NewTransactionRepository(gdb)
@@ -45,10 +41,8 @@ func main() {
 		port = "8080"
 	}
 
-	// ルーティング設定の分離
 	handler.RegisterRoutes(echoServer, accountHandler, internalBankAccountHandler)
 
-	// Start server
 	if err := echoServer.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("failed to start server", "error", err)
 	}

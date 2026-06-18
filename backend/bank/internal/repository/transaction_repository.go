@@ -41,10 +41,7 @@ func (r *gormTransactionRepo) GetTransactionsByUserID(ctx context.Context, userI
 }
 
 func (r *gormTransactionRepo) MarkAsPrintedTx(ctx context.Context, tx *gorm.DB, ids []int64) error {
-	if err := tx.WithContext(ctx).Model(&entity.Transaction{}).Where("id IN ?", ids).Update("is_printed", true).Error; err != nil {
-		return err
-	}
-	return nil
+	return tx.WithContext(ctx).Model(&entity.Transaction{}).Where("id IN ?", ids).Update("is_printed", true).Error
 }
 
 func (r *gormTransactionRepo) GetTransactionSumByUserID(ctx context.Context, userID uuid.UUID) (int64, error) {
